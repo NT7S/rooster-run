@@ -279,7 +279,7 @@ function initGame() {
     const leg = new THREE.Group();
     leg.position.set(x, 0.72, z);
     addCube(leg, 0xffc733, 0, -0.30, 0, 0.20, 0.62, 0.20);
-    addCube(leg, 0xffb01f, 0, -0.62, 0.18, 0.24, 0.14, 0.38);
+    addCube(leg, 0xffb01f, 0.18, -0.62, 0, 0.38, 0.14, 0.24);
     parent.add(leg);
     return leg;
   }
@@ -287,8 +287,8 @@ function initGame() {
   function buildRooster() {
     const root = new THREE.Group();
 
-    const legL = makeLeg(root, -0.28, 0.14);
-    const legR = makeLeg(root, 0.30, -0.14);
+    const legL = makeLeg(root, 0, 0.22);
+    const legR = makeLeg(root, 0, -0.22);
 
     const bodyGroup = new THREE.Group();
     bodyGroup.position.set(0, 1.36, 0);
