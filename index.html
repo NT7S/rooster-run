@@ -534,11 +534,12 @@ function initGame() {
     if (subtype === "scarecrow") {
       const h = 0.65 + rng() * 0.15;
       const w = 1.9 + rng() * 0.4;
-      addCube(g, 0x6d4c41, 0, bottom + h + 0.85, 0, 0.34, 1.70, 0.34);
+      const poleH = 1.70;
+      addCube(g, 0x6d4c41, 0, bottom + h + poleH / 2, 0, 0.34, poleH, 0.34);
       addCube(g, 0xd6b15e, 0, bottom + h / 2, 0, w, h * 0.52, 0.36);
       addCube(g, 0x6d4c41, -w / 2, bottom + h / 2, 0, 0.52, h * 0.62, 0.36);
       addCube(g, 0x6d4c41, w / 2, bottom + h / 2, 0, 0.52, h * 0.62, 0.36);
-      return { width: w, yMin: bottom, yMax: bottom + h };
+      return { width: w, yMin: bottom, yMax: bottom + h + poleH };
     }
 
     const h = 1.25 + rng() * 0.25;
@@ -585,7 +586,10 @@ function initGame() {
     spawnDistance -= speed * dt;
     if (spawnDistance <= 0) {
       spawnObstacle();
-      const minGap = Math.max(0.95, 1.35 - (speed - START_SPEED) * 0.04);
+      // Floor the spawn gap so it comfortably exceeds a single jump's air time
+      // (2 * JUMP_V / |GRAVITY| ≈ 0.84 s) plus reaction time, so a duck can start
+      // after clearing a ground obstacle even at max speed (was 0.95 s → 0.11 s window).
+      const minGap = Math.max(1.20, 1.35 - (speed - START_SPEED) * 0.04);
       spawnDistance = (minGap + rng() * 0.8) * speed;
     }
   }
