@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<link rel="icon" href="data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Crect%20width='16'%20height='16'%20fill='%23e23b3b'/%3E%3Ccircle%20cx='8'%20cy='6'%20r='4'%20fill='%23ffd54f'/%3E%3Crect%20x='4'%20y='10'%20width='8'%20height='3'%20fill='%23ffb020'/%3E%3C/svg%3E">
+<title>Rooster Run</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: linear-gradient(#8fd7ff 0%, #d8f7ff 100%);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    color: #2a1c10;
+  }
+  #game {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    background: #9fe3ff;
+  }
+  #hud {
+    position: fixed;
+    top: max(12px, env(safe-area-inset-top));
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: space-between;
+    padding: 0 18px;
+    z-index: 5;
+    pointer-events: none;
+    font-weight: 900;
+    font-size: clamp(18px, 4.2vw, 30px);
+    color: #2a1c10;
+    text-shadow: 0 2px 0 rgba(255,255,255,0.85);
+  }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    pointer-events: none;
+  }
+  .panel {
+    background: rgba(255, 250, 238, 0.92);
+    border: 5px solid #3b2615;
+    border-radius: 18px;
+    box-shadow: 0 12px 0 rgba(43, 24, 7, 0.16), 0 0 0 8px rgba(255,255,255,0.28) inset;
+    padding: clamp(18px, 4vw, 34px) clamp(22px, 5vw, 44px);
+    max-width: min(92vw, 620px);
+    text-align: center;
+  }
+  h1 {
+    margin: 0 0 10px;
+    font-size: clamp(32px, 8vw, 64px);
+    line-height: 1;
+    color: #3b2615;
+    text-shadow: 3px 3px 0 rgba(255,255,255,0.8);
+  }
+  p {
+    margin: 10px 0;
+    font-size: clamp(15px, 2.8vw, 22px);
+    line-height: 1.35;
+  }
+  .controls {
+    font-weight: 800;
+    color: #4d351d;
+  }
+  .record {
+    color: #c62828;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+  }
+  .hidden { display: none !important; }
+  #fatal {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    text-align: center;
+    background: #17212b;
+    color: #fff;
+    font-size: 20px;
+    font-weight: 700;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="score">0</div>
+  <div id="high">HI 0</div>
+</div>
+
+<div id="startOverlay" class="overlay">
+  <div class="panel">
+    <h1>Rooster Run</h1>
+    <p>Flap over farm clutter and duck under low flight.</p>
+    <p class="controls">
+      Space / tap: jump & flap<br>
+      Down / swipe down: duck
+    </p>
+    <p>Press Space or tap to start</p>
+  </div>
+</div>
+
+<div id="gameOverOverlay" class="overlay hidden">
+  <div class="panel">
+    <h1>Cluck!</h1>
+    <p id="finalScore">Score 0</p>
+    <p id="finalHigh">HI 0</p>
+    <p id="newRecord" class="record hidden">NEW RECORD</p>
+    <p>Press Space or tap to restart</p>
+  </div>
+</div>
+
+<div id="fatal" class="hidden">
+  WebGL is not available. Please use a modern browser with WebGL enabled.
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+
+const canvas = document.getElementById("game");
+const startOverlay = document.getElementById("startOverlay");
+const gameOverOverlay = document.getElementById("gameOverOverlay");
+const finalScoreEl = document.getElementById("finalScore");
+const finalHighEl = document.getElementById("finalHigh");
+const newRecordEl = document.getElementById("newRecord");
+const fatalEl = document.getElementById("fatal");
+const scoreEl = document.getElementById("score");
+const highEl = document.getElementById("high");
+
+function fatal(message) {
+  fatalEl.textContent = message;
+  fatalEl.classList.remove("hidden");
+}
+
+function hasWebGL() {
+  try {
+    const c = document.createElement("canvas");
+    return !!(window.WebGLRenderingContext && (c.getContext("webgl2") || c.getContext("webgl")));
+  } catch {
+    return false;
+  }
+}
+
+if (!hasWebGL()) {
+  fatal("WebGL is not available. Please use a modern browser with WebGL enabled.");
+} else {
+  initGame();
+}
+
+function initGame() {
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: false,
+      alpha: false,
+      powerPreference: "low-power"
+    });
+  } catch {
+    fatal("Could not create a WebGL context.");
+    return;
+  }
+
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x9fe3ff);
+
+  const camera = new THREE.OrthographicCamera(-10, 10, 8, -8, 0.1, 120);
+  camera.position.set(2, 4, 30);
+  camera.lookAt(camera.position.x, camera.position.y, 0);
+
+  const ambient = new THREE.AmbientLight(0xffffff, 0.92);
+  scene.add(ambient);
+  const sun = new THREE.DirectionalLight(0xfff2cf, 0.95);
+  sun.position.set(7, 14, 9);
+  scene.add(sun);
+
+  const GROUND_Y = 0;
+  const PLAYER_X = 0;
+  const PLAYER_W = 1.5;
+  const STAND_H = 3.05;
+  const DUCK_H = 1.72;
+  const MAX_FLAPS = 2;
+  const GRAVITY = -30;
+  const JUMP_V = 12.6;
+  const FLAP_V = 8.4;
+  const START_SPEED = 10;
+  const MAX_SPEED = 20;
+  const SPEED_RAMP = 0.22;
+  const SPAWN_MARGIN = 6;
+
+  let state = "start";
+  let started = false;
+  let running = false;
+  let gameOver = false;
+  let score = 0;
+  let highScore = 0;
+  let time = 0;
+  let worldTime = 0;
+  let speed = START_SPEED;
+  let speedBase = START_SPEED;
+  let playerY = 0;
+  let vy = 0;
+  let onGround = true;
+  let duckInput = false;
+  let ducking = false;
+  let flapsLeft = MAX_FLAPS;
+  let wingLift = 0;
+  let runPhase = 0;
+  let deadTime = 0;
+  let gameOverAt = 0;
+  let obstacles = [];
+  let spawnDistance = START_SPEED * 1.6;
+  let spawnCount = 0;
+  let viewWidth = 24;
+  let viewHeight = 12;
+
+  try {
+    highScore = Math.max(0, Number(localStorage.getItem("roosterRunHighScore") || 0) || 0);
+  } catch {
+    highScore = 0;
+  }
+
+  const unitBox = new THREE.BoxGeometry(1, 1, 1);
+  const matCache = new Map();
+  function mat(color) {
+    if (!matCache.has(color)) {
+      matCache.set(color, new THREE.MeshLambertMaterial({ color, flatShading: true }));
+    }
+    return matCache.get(color);
+  }
+
+  function addCube(parent, color, x, y, z, sx = 1, sy = 1, sz = 1) {
+    const mesh = new THREE.Mesh(unitBox, mat(color));
+    mesh.position.set(x, y, z);
+    mesh.scale.set(sx, sy, sz);
+    parent.add(mesh);
+    return mesh;
+  }
+
+  function makeLeg(parent, x, z) {
+    const leg = new THREE.Group();
+    leg.position.set(x, 0.72, z);
+    addCube(leg, 0xffc733, 0, -0.30, 0, 0.20, 0.62, 0.20);
+    addCube(leg, 0xffb01f, 0, -0.62, 0.18, 0.24, 0.14, 0.38);
+    parent.add(leg);
+    return leg;
+  }
+
+  function buildRooster() {
+    const root = new THREE.Group();
+
+    const legL = makeLeg(root, -0.28, 0.14);
+    const legR = makeLeg(root, 0.30, -0.14);
+
+    const bodyGroup = new THREE.Group();
+    bodyGroup.position.set(0, 1.36, 0);
+    root.add(bodyGroup);
+
+    const tailGroup = new THREE.Group();
+    tailGroup.position.set(-0.66, 0.18, 0);
+    bodyGroup.add(tailGroup);
+
+    const t1 = addCube(tailGroup, 0x2b2633, -0.18, 0.14, 0, 0.54, 0.17, 0.86);
+    t1.rotation.z = -0.58;
+    const t2 = addCube(tailGroup, 0x5b3a27, -0.34, 0.03, 0, 0.64, 0.17, 0.76);
+    t2.rotation.z = -0.32;
+    const t3 = addCube(tailGroup, 0x3d4c72, -0.48, -0.06, 0, 0.52, 0.17, 0.64);
+    t3.rotation.z = -0.10;
+
+    addCube(bodyGroup, 0x8c5a3b, 0, 0, 0, 1.36, 1.06, 0.96);
+    addCube(bodyGroup, 0xfdf6ec, 0.28, 0.02, 0.16, 0.78, 0.82, 0.78);
+    addCube(bodyGroup, 0xfdf6ec, 0.50, 0.16, 0.02, 0.52, 0.58, 0.68);
+
+    const wingL = new THREE.Group();
+    wingL.position.set(-0.08, 0.06, 0.55);
+    wingL.rotation.z = 0.12;
+    addCube(wingL, 0x8c5a3b, 0, 0, 0, 0.72, 0.56, 0.20);
+    addCube(wingL, 0xfdf6ec, 0.14, 0.10, 0, 0.42, 0.36, 0.18);
+    bodyGroup.add(wingL);
+
+    const wingR = new THREE.Group();
+    wingR.position.set(-0.08, 0.06, -0.55);
+    wingR.rotation.z = -0.12;
+    addCube(wingR, 0x8c5a3b, 0, 0, 0, 0.72, 0.56, 0.20);
+    addCube(wingR, 0xfdf6ec, 0.14, 0.10, 0, 0.42, 0.36, 0.18);
+    bodyGroup.add(wingR);
+
+    const headGroup = new THREE.Group();
+    headGroup.position.set(0.62, 0.88, 0);
+    bodyGroup.add(headGroup);
+
+    addCube(headGroup, 0x8c5a3b, 0, 0, 0, 0.74, 0.74, 0.74);
+    addCube(headGroup, 0xfdf6ec, 0.12, 0.04, 0.10, 0.46, 0.52, 0.48);
+
+    addCube(headGroup, 0xe23b3b, -0.14, 0.50, 0, 0.22, 0.36, 0.22);
+    addCube(headGroup, 0xe23b3b, 0.10, 0.54, 0, 0.22, 0.42, 0.22);
+    addCube(headGroup, 0xe23b3b, -0.02, 0.58, 0, 0.18, 0.30, 0.18);
+
+    addCube(headGroup, 0xffb020, 0.48, -0.02, 0, 0.32, 0.22, 0.26);
+    addCube(headGroup, 0xff8f12, 0.58, 0.07, 0, 0.16, 0.16, 0.20);
+
+    addCube(headGroup, 0xe23b3b, 0.36, -0.38, 0, 0.24, 0.38, 0.22);
+    addCube(headGroup, 0x191919, 0.18, 0.14, 0.34, 0.15, 0.15, 0.14);
+
+    root.position.set(PLAYER_X, GROUND_Y, 0);
+    scene.add(root);
+
+    return { root, bodyGroup, headGroup, tailGroup, wingL, wingR, legL, legR };
+  }
+
+  const rooster = buildRooster();
+
+  const GROUND_TILE_W = 4;
+  const GROUND_H = 10;
+  const GROUND_COUNT = 64;
+  const groundGeo = new THREE.BoxGeometry(GROUND_TILE_W, GROUND_H, GROUND_TILE_W);
+  const groundMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+  const ground = new THREE.InstancedMesh(groundGeo, groundMat, GROUND_COUNT);
+  ground.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  ground.frustumCulled = false;
+  scene.add(ground);
+
+  const tileX = new Float32Array(GROUND_COUNT);
+  let groundSpan = 0;
+  const tmpObj = new THREE.Object3D();
+  const tmpColor = new THREE.Color();
+
+  function writeGroundTile(i, x) {
+    tileX[i] = x;
+    tmpObj.position.set(x, -GROUND_H / 2, 0);
+    tmpObj.scale.set(1, 1, 1);
+    tmpObj.rotation.set(0, 0, 0);
+    tmpObj.updateMatrix();
+    ground.setMatrixAt(i, tmpObj.matrix);
+    const worldIndex = Math.floor(x / GROUND_TILE_W);
+    const a = ((worldIndex % 7) + 7) % 7;
+    if (a === 0) tmpColor.setHex(0x59b843);
+    else if (a === 1) tmpColor.setHex(0x68c453);
+    else if (a === 2) tmpColor.setHex(0x775030);
+    else tmpColor.setHex(0x5fb849);
+    ground.setColorAt(i, tmpColor);
+  }
+
+  function setupGround() {
+    const left = camera.position.x + camera.left;
+    const right = camera.position.x + camera.right;
+    const margin = GROUND_TILE_W * 3;
+    const start = Math.floor((left - margin) / GROUND_TILE_W) * GROUND_TILE_W;
+    const end = Math.ceil((right + margin) / GROUND_TILE_W) * GROUND_TILE_W;
+    groundSpan = Math.max(GROUND_TILE_W * GROUND_COUNT, end - start);
+    for (let i = 0; i < GROUND_COUNT; i++) {
+      writeGroundTile(i, start + i * GROUND_TILE_W + GROUND_TILE_W / 2);
+    }
+    ground.instanceMatrix.needsUpdate = true;
+    if (ground.instanceColor) ground.instanceColor.needsUpdate = true;
+  }
+
+  function updateGround(sp, dt) {
+    if (!sp) return;
+    const dx = sp * dt;
+    const leftLimit = camera.position.x + camera.left - GROUND_TILE_W * 2;
+    for (let i = 0; i < GROUND_COUNT; i++) {
+      let x = tileX[i] - dx;
+      if (x < leftLimit) x += groundSpan;
+      writeGroundTile(i, x);
+    }
+    ground.instanceMatrix.needsUpdate = true;
+  }
+
+  const clouds = [];
+  const cloudBaseColors = [0xffffff, 0xf4f7fb, 0xe8eef6];
+  function makeCloud() {
+    const g = new THREE.Group();
+    const c = cloudBaseColors[(Math.random() * cloudBaseColors.length) | 0];
+    addCube(g, c, 0, 0, 0, 1.7, 0.9, 1.0);
+    addCube(g, c, -1.05, -0.1, 0.1, 1.1, 0.62, 0.8);
+    addCube(g, c, 1.15, -0.05, -0.08, 1.25, 0.55, 0.85);
+    addCube(g, c, 0.25, 0.48, -0.05, 0.9, 0.48, 0.7);
+    g.position.set(Math.random() * 40, 6, -4);
+    scene.add(g);
+    return { group: g, speed: 0.35 + Math.random() * 0.55 };
+  }
+  for (let i = 0; i < 5; i++) clouds.push(makeCloud());
+
+  function resize() {
+    const w = Math.max(1, window.innerWidth);
+    const h = Math.max(1, window.innerHeight);
+    const aspect = w / h;
+    renderer.setSize(w, h, false);
+
+    const baseH = 12;
+    viewWidth = Math.max(18, baseH * aspect);
+    viewHeight = viewWidth / aspect;
+
+    const halfW = viewWidth / 2;
+    const halfH = viewHeight / 2;
+    camera.left = -halfW;
+    camera.right = halfW;
+    camera.top = halfH;
+    camera.bottom = -halfH;
+    camera.position.set(viewWidth / 6, GROUND_Y + viewHeight * 0.34, 30);
+    camera.lookAt(camera.position.x, camera.position.y, 0);
+    camera.updateProjectionMatrix();
+
+    setupGround();
+    for (const cloud of clouds) {
+      cloud.group.position.y = GROUND_Y + viewHeight * (0.32 + Math.random() * 0.28);
+    }
+  }
+  window.addEventListener("resize", resize);
+  window.addEventListener("orientationchange", () => setTimeout(resize, 120));
+  resize();
+
+  let seed = 2463534242;
+  function rng() {
+    seed |= 0;
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  function currentRight() {
+    return camera.position.x + camera.right;
+  }
+  function currentLeft() {
+    return camera.position.x + camera.left;
+  }
+
+  function buildGroundObstacle(g, subtype) {
+    if (subtype === "hay") {
+      const w = 2.2 + rng() * 0.7;
+      const h = 1.0 + rng() * 0.4;
+      addCube(g, 0xd9a441, 0, h / 2, 0, w, h, 1.7);
+      addCube(g, 0xe8c266, 0, h + 0.22, 0, w * 0.55, 0.45, 1.3);
+      return { width: w, yMin: 0, yMax: h + 0.45 };
+    }
+
+    if (subtype === "fence") {
+      const w = 2.0 + rng() * 0.8;
+      const h = 1.2 + rng() * 0.5;
+      addCube(g, 0x8b5a2b, -w / 2, h / 2, 0, 0.36, h, 0.36);
+      addCube(g, 0x8b5a2b, 0, h / 2, 0, 0.32, h, 0.32);
+      addCube(g, 0x8b5a2b, w / 2, h / 2, 0, 0.36, h, 0.36);
+      addCube(g, 0x6b4423, 0, h * 0.72, 0, w, 0.22, 0.30);
+      addCube(g, 0x6b4423, 0, h * 0.36, 0, w, 0.18, 0.26);
+      return { width: w, yMin: 0, yMax: h };
+    }
+
+    if (subtype === "corn") {
+      const w = 1.2 + rng() * 0.5;
+      const h = 1.5 + rng() * 0.55;
+      for (let i = -1; i <= 1; i++) {
+        const x = i * 0.45;
+        addCube(g, 0x46a33d, x, h / 2, 0, 0.28, h, 0.28);
+        addCube(g, 0xa5d14b, x, h + 0.12, 0, 0.20, 0.30, 0.20);
+      }
+      if (rng() < 0.75) {
+        const leaf = addCube(g, 0x65c24a, -0.22, h * 0.76, 0.18, 0.62, 0.16, 0.16);
+        leaf.rotation.z = 0.45;
+      }
+      return { width: Math.max(w, 1.0), yMin: 0, yMax: h + 0.25 };
+    }
+
+    const d = 1.5 + rng() * 0.65;
+    const R = Math.max(0.25, d / 2 - 0.18);
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      addCube(g, 0x2b2b2e, Math.cos(a) * R, d / 2 + Math.sin(a) * R, 0, 0.38, 0.38, 0.56);
+    }
+    addCube(g, 0x4b4b55, 0, d / 2, 0, 0.46, 0.46, 0.58);
+    return { width: d, yMin: 0, yMax: d };
+  }
+
+  function buildOverheadObstacle(g, subtype) {
+    const bottom = 1.95 + rng() * 0.20;
+
+    if (subtype === "hawk") {
+      const h = 0.95 + rng() * 0.15;
+      addCube(g, 0x3b2a22, 0, bottom + h / 2, 0, 1.12, h * 0.70, 0.70);
+      addCube(g, 0x3b2a22, 0.62, bottom + h * 0.62, 0, 0.46, 0.42, 0.42);
+      addCube(g, 0xffa928, 0.88, bottom + h * 0.56, 0, 0.22, 0.12, 0.16);
+      const wingL = addCube(g, 0x1d1918, -0.10, bottom + h * 0.66, 0.36, 0.92, 0.18, 0.26);
+      wingL.rotation.z = 0.26;
+      const wingR = addCube(g, 0x1d1918, -0.10, bottom + h * 0.66, -0.36, 0.92, 0.18, 0.26);
+      wingR.rotation.z = -0.26;
+      return {
+        width: 1.85,
+        yMin: bottom,
+        yMax: bottom + h,
+        wings: [wingL, wingR],
+        baseWing: [0.26, -0.26]
+      };
+    }
+
+    if (subtype === "scarecrow") {
+      const h = 0.65 + rng() * 0.15;
+      const w = 1.9 + rng() * 0.4;
+      addCube(g, 0x6d4c41, 0, bottom + h + 0.85, 0, 0.34, 1.70, 0.34);
+      addCube(g, 0xd6b15e, 0, bottom + h / 2, 0, w, h * 0.52, 0.36);
+      addCube(g, 0x6d4c41, -w / 2, bottom + h / 2, 0, 0.52, h * 0.62, 0.36);
+      addCube(g, 0x6d4c41, w / 2, bottom + h / 2, 0, 0.52, h * 0.62, 0.36);
+      return { width: w, yMin: bottom, yMax: bottom + h };
+    }
+
+    const h = 1.25 + rng() * 0.25;
+    const w = 2.3 + rng() * 0.7;
+    addCube(g, 0x7a4a2b, 0, bottom + h / 2, 0, w, h, 0.62);
+    addCube(g, 0x5c381f, -w * 0.22, bottom + h / 2, 0, 0.22, h * 0.82, 0.66);
+    addCube(g, 0x5c381f, w * 0.22, bottom + h / 2, 0, 0.22, h * 0.82, 0.66);
+    addCube(g, 0x5c381f, -w * 0.34, bottom + h + 0.72, 0, 0.34, 1.45, 0.52);
+    addCube(g, 0x5c381f, w * 0.34, bottom + h + 0.72, 0, 0.34, 1.45, 0.52);
+    return { width: w, yMin: bottom, yMax: bottom + h };
+  }
+
+  function spawnObstacle() {
+    spawnCount++;
+    const kind = spawnCount % 2 === 1 ? "ground" : "overhead";
+    let subtype;
+    const r = rng();
+    if (kind === "ground") {
+      subtype = r < 0.32 ? "hay" : r < 0.58 ? "fence" : r < 0.82 ? "corn" : "tire";
+    } else {
+      subtype = r < 0.42 ? "hawk" : r < 0.72 ? "scarecrow" : "beam";
+    }
+
+    const g = new THREE.Group();
+    const built = kind === "ground" ? buildGroundObstacle(g, subtype) : buildOverheadObstacle(g, subtype);
+    const x = currentRight() + SPAWN_MARGIN + rng() * 3;
+    g.position.set(x, GROUND_Y, 0);
+    scene.add(g);
+
+    obstacles.push({
+      group: g,
+      type: subtype,
+      kind,
+      x,
+      width: built.width,
+      yMin: built.yMin,
+      yMax: built.yMax,
+      wings: built.wings || null,
+      baseWing: built.baseWing || null
+    });
+  }
+
+  function updateSpawns(dt) {
+    spawnDistance -= speed * dt;
+    if (spawnDistance <= 0) {
+      spawnObstacle();
+      const minGap = Math.max(0.95, 1.35 - (speed - START_SPEED) * 0.04);
+      spawnDistance = (minGap + rng() * 0.8) * speed;
+    }
+  }
+
+  function updateObstacles(dt) {
+    const dx = speed * dt;
+    const left = currentLeft() - 12;
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+      const ob = obstacles[i];
+      ob.x -= dx;
+      ob.group.position.x = ob.x;
+
+      if (ob.wings && ob.baseWing) {
+        const flap = Math.sin(worldTime * 11 + ob.x) * 0.45;
+        ob.wings[0].rotation.z = ob.baseWing[0] + flap;
+        ob.wings[1].rotation.z = ob.baseWing[1] - flap;
+      }
+
+      if (ob.x + ob.width / 2 < left) {
+        scene.remove(ob.group);
+        obstacles.splice(i, 1);
+      }
+    }
+  }
+
+  function updateClouds(dt, worldSpeed) {
+    const left = currentLeft() - 12;
+    const right = currentRight() + 12;
+    for (const cloud of clouds) {
+      cloud.group.position.x -= (cloud.speed + worldSpeed * 0.18) * dt;
+      if (cloud.group.position.x < left) {
+        cloud.group.position.x = right + rng() * 18;
+        cloud.group.position.y = GROUND_Y + viewHeight * (0.32 + Math.random() * 0.28);
+      }
+    }
+  }
+
+  function gameSetVisible(id, visible) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.classList) el.classList.toggle('hidden', !visible);
+    el.style.display = visible ? '' : 'none';
+  }
+
+  function gameSetText(ids, text) {
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    }
+  }
+
+  function gameUpdateScoreUI() {
+    const scoreEl = document.getElementById('score');
+    if (scoreEl) scoreEl.textContent = String(Math.floor(score));
+    const highEl = document.getElementById('high');
+    if (highEl) highEl.textContent = 'HI ' + highScore;
+  }
+
+  function startRun() {
+    score = 0;
+    time = 0;
+    speed = START_SPEED;
+    speedBase = START_SPEED;
+    playerY = 0;
+    vy = 0;
+    onGround = true;
+    duckInput = false;
+    ducking = false;
+    flapsLeft = MAX_FLAPS;
+    wingLift = 0;
+    runPhase = 0;
+    deadTime = 0;
+    gameOverAt = 0;
+    spawnCount = 0;
+    spawnDistance = Math.max(START_SPEED * 1.8, 14);
+
+    for (const o of obstacles) {
+      const obj = o.group || o.object || o.mesh;
+      if (obj && obj.parent) obj.parent.remove(obj);
+    }
+    obstacles.length = 0;
+
+    running = true;
+    started = true;
+    gameOver = false;
+    state = 'run';
+
+    gameSetVisible('startOverlay', false);
+    gameSetVisible('gameOverOverlay', false);
+    gameSetVisible('newRecord', false);
+    gameUpdateScoreUI();
+  }
+
+  function restart() {
+    startRun();
+  }
+
+  function gameTriggerGameOver() {
+    if (gameOver) return;
+    gameOver = true;
+    running = false;
+    state = 'gameover';
+    gameOverAt = time;
+    deadTime = 0;
+
+    const finalScore = Math.floor(score);
+    let newRecord = false;
+    if (finalScore > highScore) {
+      highScore = finalScore;
+      newRecord = true;
+      try {
+        localStorage.setItem('roosterRunHighScore', String(highScore));
+      } catch (err) {}
+    }
+
+    gameSetVisible('startOverlay', false);
+    gameSetVisible('gameOverOverlay', true);
+    gameSetVisible('newRecord', newRecord);
+    gameSetText(['finalScore', 'gameOverScore', 'scoreFinal'], 'Score ' + String(finalScore));
+    gameSetText(['finalHigh', 'highFinal', 'bestScore'], 'HI ' + String(highScore));
+    gameUpdateScoreUI();
+  }
+
+  function jump() {
+    if (state === 'start') {
+      startRun();
+      if (onGround) {
+        vy = JUMP_V;
+        onGround = false;
+        wingLift = Math.min(1, wingLift + 0.75);
+      }
+      return;
+    }
+    if (gameOver || !running) return;
+
+    if (onGround) {
+      vy = JUMP_V;
+      onGround = false;
+      wingLift = Math.min(1, wingLift + 0.75);
+    } else if (flapsLeft > 0) {
+      vy = Math.max(vy, 0) + FLAP_V;
+      flapsLeft--;
+      wingLift = 1;
+    }
+  }
+
+  function duck(pressed) {
+    duckInput = !!pressed;
+    if (pressed && running && !onGround) {
+      vy = Math.min(vy, -Math.abs(JUMP_V) * 0.55);
+    }
+  }
+
+  function gameCheckCollision() {
+    const pLeft = PLAYER_X - PLAYER_W * 0.5;
+    const pRight = PLAYER_X + PLAYER_W * 0.5;
+    const pBottom = playerY;
+    const pTop = playerY + (ducking ? DUCK_H : STAND_H);
+    const margin = 0.12;
+
+    for (const o of obstacles) {
+      const w = o.width || 0;
+      const oLeft = o.x - w * 0.5;
+      const oRight = o.x + w * 0.5;
+      const oBottom = o.yMin;
+      const oTop = o.yMax;
+
+      if (pRight - margin > oLeft &&
+          pLeft + margin < oRight &&
+          pTop - margin > oBottom &&
+          pBottom + margin < oTop) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function gameUpdatePlayer(dt) {
+    const userData = rooster.root.userData;
+    if (!userData.__rr) {
+      userData.__rr = {
+        bodyY: rooster.bodyGroup.position.y,
+        bodyScaleY: rooster.bodyGroup.scale.y,
+        headX: rooster.headGroup.position.x,
+        headY: rooster.headGroup.position.y,
+        headRotX: rooster.headGroup.rotation.x,
+        headRotZ: rooster.headGroup.rotation.z,
+        legLX: rooster.legL.rotation.x,
+        legRX: rooster.legR.rotation.x,
+        legLY: rooster.legL.position.y,
+        legRY: rooster.legR.position.y,
+        legLZ: rooster.legL.rotation.z,
+        legRZ: rooster.legR.rotation.z,
+        legLScaleY: rooster.legL.scale.y,
+        legRScaleY: rooster.legR.scale.y,
+        wingLZ: rooster.wingL.rotation.z,
+        wingRZ: rooster.wingR.rotation.z,
+        tailZ: rooster.tailGroup.rotation.z
+      };
+    }
+    const base = userData.__rr;
+
+    if (running) {
+      vy += GRAVITY * dt;
+      playerY += vy * dt;
+
+      if (playerY > viewHeight) {
+        playerY = viewHeight;
+        vy = Math.min(vy, 0);
+      }
+
+      if (playerY <= 0) {
+        playerY = 0;
+        vy = 0;
+        onGround = true;
+        flapsLeft = MAX_FLAPS;
+      }
+
+      ducking = duckInput && onGround;
+
+      if (onGround && !ducking) {
+        runPhase += dt * (5 + speed * 0.85);
+      }
+
+      if (!onGround) {
+        wingLift = Math.min(1, wingLift + dt * 3.5);
+      }
+    } else if (state === 'start') {
+      playerY = 0;
+      vy = 0;
+      onGround = true;
+      ducking = false;
+    } else {
+      vy = 0;
+      ducking = false;
+      onGround = playerY <= 0.02;
+    }
+
+    wingLift = Math.max(0, wingLift - dt * 2.2);
+    const airborne = running && !onGround;
+
+    rooster.root.position.set(PLAYER_X, GROUND_Y + playerY, 0);
+
+    const idle = state === 'start';
+    const bob = idle
+      ? Math.sin(worldTime * 3) * 0.06
+      : (running && onGround && !ducking ? Math.sin(runPhase * 2) * 0.04 : 0);
+
+    if (ducking) {
+      rooster.bodyGroup.position.y = base.bodyY - 0.68;
+      rooster.bodyGroup.scale.y = base.bodyScaleY * 0.80;
+
+      rooster.headGroup.position.x = base.headX + 0.08;
+      rooster.headGroup.position.y = base.headY - 0.30;
+      rooster.headGroup.rotation.x = base.headRotX;
+      rooster.headGroup.rotation.z = base.headRotZ - 0.32;
+
+      rooster.legL.position.y = base.legLY - 0.12;
+      rooster.legR.position.y = base.legRY - 0.12;
+      rooster.legL.scale.y = 0.90;
+      rooster.legR.scale.y = 0.90;
+      rooster.legL.rotation.z = base.legLZ - 0.28;
+      rooster.legR.rotation.z = base.legRZ - 0.28;
+    } else {
+      rooster.bodyGroup.position.y = base.bodyY + bob;
+      rooster.bodyGroup.scale.y = base.bodyScaleY;
+
+      rooster.headGroup.position.x = base.headX;
+      rooster.headGroup.position.y = base.headY;
+      rooster.headGroup.rotation.x = base.headRotX;
+      rooster.headGroup.rotation.z = base.headRotZ;
+
+      rooster.legL.position.y = base.legLY;
+      rooster.legR.position.y = base.legRY;
+      rooster.legL.scale.y = base.legLScaleY;
+      rooster.legR.scale.y = base.legRScaleY;
+      rooster.legL.rotation.z = base.legLZ;
+      rooster.legR.rotation.z = base.legRZ;
+    }
+
+    const legSwing = (running && onGround && !ducking) ? Math.sin(runPhase) * 0.75 : 0;
+    rooster.legL.rotation.x = base.legLX + legSwing;
+    rooster.legR.rotation.x = base.legRX - legSwing;
+
+    const wing = airborne || wingLift > 0
+      ? 0.18 + wingLift * 0.36
+      : (running ? 0.10 : 0.04);
+    rooster.wingL.rotation.z = base.wingLZ + wing;
+    rooster.wingR.rotation.z = base.wingRZ - wing;
+
+    rooster.tailGroup.rotation.x = 0;
+    rooster.tailGroup.rotation.z = base.tailZ + (airborne ? -0.08 : (running ? 0.05 : 0.02));
+    rooster.root.rotation.z = gameOver ? Math.min(0.65, deadTime * 3.5) : 0;
+  }
+
+  function gamePressAction() {
+    if (state === 'gameover') {
+      if (deadTime > 0.25) restart();
+    } else {
+      jump();
+    }
+  }
+
+  function gameKeydown(e) {
+    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+      e.preventDefault();
+      if (e.repeat) return;
+      gamePressAction();
+      return;
+    }
+
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+      e.preventDefault();
+      if (!e.repeat) duck(true);
+    }
+  }
+
+  function gameKeyup(e) {
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+      e.preventDefault();
+      duck(false);
+    }
+  }
+
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchActive = false;
+  let touchJumped = false;
+  let touchDuckHeld = false;
+
+  function gameTouchStart(e) {
+    e.preventDefault();
+    const t = e.touches[0];
+    if (!t) return;
+    touchStartX = t.clientX;
+    touchStartY = t.clientY;
+    touchActive = true;
+    touchJumped = false;
+    if (t.clientY > window.innerHeight * 0.66) {
+      duck(true);
+      touchDuckHeld = true;
+    } else {
+      touchDuckHeld = false;
+    }
+  }
+
+  function gameTouchMove(e) {
+    e.preventDefault();
+    if (!touchActive || !e.touches.length) return;
+    const t = e.touches[0];
+    const dx = t.clientX - touchStartX;
+    const dy = t.clientY - touchStartY;
+
+    if (Math.abs(dy) > 40 && Math.abs(dy) > Math.abs(dx)) {
+      if (dy > 0) {
+        duck(true);
+        touchDuckHeld = true;
+      } else if (!touchJumped) {
+        touchJumped = true;
+        gamePressAction();
+      }
+    }
+  }
+
+  function gameTouchEnd(e) {
+    e.preventDefault();
+    if (!touchActive) return;
+    touchActive = false;
+
+    const t = e.changedTouches[0];
+    const dx = t ? t.clientX - touchStartX : 0;
+    const dy = t ? t.clientY - touchStartY : 0;
+    const isSwipeUp = dy < -40 && Math.abs(dy) > Math.abs(dx);
+    const isTap = Math.abs(dx) < 12 && Math.abs(dy) < 12;
+
+    if ((isSwipeUp || isTap) && !touchJumped) {
+      gamePressAction();
+    }
+
+    if (touchDuckHeld) {
+      duck(false);
+      touchDuckHeld = false;
+    }
+  }
+
+  function gameTouchCancel(e) {
+    e.preventDefault();
+    touchActive = false;
+    if (touchDuckHeld) {
+      duck(false);
+      touchDuckHeld = false;
+    }
+  }
+
+  function gameLoop(t) {
+    const last = gameLoop.__last || t;
+    gameLoop.__last = t;
+    let dt = (t - last) / 1000;
+    if (!Number.isFinite(dt) || dt < 0) dt = 0;
+    if (dt > 0.05) dt = 0.05;
+
+    worldTime += dt;
+
+    if (running) {
+      time += dt;
+      speedBase = Math.min(MAX_SPEED, speedBase + SPEED_RAMP * dt);
+      speed = speedBase;
+      score += speed * dt * 10;
+    }
+
+    if (gameOver) {
+      deadTime += dt;
+    }
+
+    gameUpdatePlayer(dt);
+
+    if (running) {
+      updateGround(speed, dt);
+      updateSpawns(dt);
+      updateObstacles(dt);
+      updateClouds(dt, speed);
+      if (gameCheckCollision()) {
+        gameTriggerGameOver();
+      }
+    } else {
+      updateClouds(dt, 0.6);
+    }
+
+    gameUpdateScoreUI();
+    renderer.render(scene, camera);
+    requestAnimationFrame(gameLoop);
+  }
+
+  try {
+    const storedHigh = parseInt(localStorage.getItem('roosterRunHighScore'), 10);
+    if (Number.isFinite(storedHigh) && storedHigh > highScore) {
+      highScore = storedHigh;
+    }
+  } catch (err) {}
+
+  gameUpdateScoreUI();
+
+  window.addEventListener('keydown', gameKeydown);
+  window.addEventListener('keyup', gameKeyup);
+  window.addEventListener('touchstart', gameTouchStart, { passive: false });
+  window.addEventListener('touchmove', gameTouchMove, { passive: false });
+  window.addEventListener('touchend', gameTouchEnd, { passive: false });
+  window.addEventListener('touchcancel', gameTouchCancel, { passive: false });
+
+  requestAnimationFrame(gameLoop);
+
+  window.__game = {
+    getState() {
+      return {
+        started,
+        running,
+        gameOver,
+        score: Math.floor(score),
+        highScore,
+        playerY,
+        onGround,
+        ducking,
+        flapsLeft,
+        speed,
+        obstacles: obstacles.map(o => ({
+          type: o.type,
+          kind: o.kind,
+          x: o.x,
+          y: (o.yMin + o.yMax) / 2,
+          w: o.width,
+          h: o.yMax - o.yMin
+        }))
+      };
+    },
+    start() {
+      if (!running) startRun();
+    },
+    restart() {
+      restart();
+    },
+    jump() {
+      jump();
+    },
+    duck(pressed) {
+      duck(!!pressed);
+    },
+    setSpeed(v) {
+      const n = Math.max(0, Number(v) || 0);
+      speed = n;
+      speedBase = n;
+    }
+  };
+  }
+</script>
+</body>
+</html>
