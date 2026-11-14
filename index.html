@@ -958,6 +958,7 @@ function initGame() {
   let touchActive = false;
   let touchJumped = false;
   let touchDuckHeld = false;
+  let touchStartDuck = false;
 
   function gameTouchStart(e) {
     e.preventDefault();
@@ -970,8 +971,10 @@ function initGame() {
     if (t.clientY > window.innerHeight * 0.66) {
       duck(true);
       touchDuckHeld = true;
+      touchStartDuck = true;
     } else {
       touchDuckHeld = false;
+      touchStartDuck = false;
     }
   }
 
@@ -1004,7 +1007,7 @@ function initGame() {
     const isSwipeUp = dy < -40 && Math.abs(dy) > Math.abs(dx);
     const isTap = Math.abs(dx) < 12 && Math.abs(dy) < 12;
 
-    if ((isSwipeUp || isTap) && !touchJumped) {
+    if ((isSwipeUp || isTap) && !touchJumped && !(touchStartDuck && isTap)) {
       gamePressAction();
     }
 
