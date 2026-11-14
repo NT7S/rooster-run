@@ -240,6 +240,18 @@ function initGame() {
   let viewWidth = 24;
   let viewHeight = 12;
 
+  const FLAP_DURATION = 0.35;
+  const FLAP_BEATS = 2.0;
+  const WING_FOLDED = -0.72;
+  const WING_DUCK = -1.08;
+  const WING_DOWN = -1.32;
+  const WING_UP = 1.05;
+  const WING_GLIDE_UP = 0.42;
+  const WING_GLIDE_DOWN = 0.20;
+  let flapT = 0;
+  let flapActive = false;
+  let wingPose = WING_FOLDED;
+
   try {
     highScore = Math.max(0, Number(localStorage.getItem("roosterRunHighScore") || 0) || 0);
   } catch {
@@ -298,17 +310,17 @@ function initGame() {
     addCube(bodyGroup, 0xfdf6ec, 0.50, 0.16, 0.02, 0.52, 0.58, 0.68);
 
     const wingL = new THREE.Group();
-    wingL.position.set(-0.08, 0.06, 0.55);
-    wingL.rotation.z = 0.12;
-    addCube(wingL, 0x8c5a3b, 0, 0, 0, 0.72, 0.56, 0.20);
-    addCube(wingL, 0xfdf6ec, 0.14, 0.10, 0, 0.42, 0.36, 0.18);
+    wingL.position.set(-0.10, 0.12, 0.48);
+    addCube(wingL, 0x8c5a3b, -0.06, 0.02, 0.04, 0.50, 0.40, 0.42);
+    addCube(wingL, 0xfdf6ec, 0.02, -0.04, 0.50, 0.78, 0.22, 0.86);
+    addCube(wingL, 0xf0dcbd, 0.14, -0.14, 0.54, 0.52, 0.10, 0.56);
     bodyGroup.add(wingL);
 
     const wingR = new THREE.Group();
-    wingR.position.set(-0.08, 0.06, -0.55);
-    wingR.rotation.z = -0.12;
-    addCube(wingR, 0x8c5a3b, 0, 0, 0, 0.72, 0.56, 0.20);
-    addCube(wingR, 0xfdf6ec, 0.14, 0.10, 0, 0.42, 0.36, 0.18);
+    wingR.position.set(-0.10, 0.12, -0.48);
+    addCube(wingR, 0x8c5a3b, -0.06, 0.02, -0.04, 0.50, 0.40, 0.42);
+    addCube(wingR, 0xfdf6ec, 0.02, -0.04, -0.50, 0.78, 0.22, 0.86);
+    addCube(wingR, 0xf0dcbd, 0.14, -0.14, -0.54, 0.52, 0.10, 0.56);
     bodyGroup.add(wingR);
 
     const headGroup = new THREE.Group();
@@ -632,6 +644,12 @@ function initGame() {
     if (highEl) highEl.textContent = 'HI ' + highScore;
   }
 
+  function startFlapCycle() {
+    flapT = 0;
+    flapActive = true;
+    wingPose = WING_DOWN;
+  }
+
   function startRun() {
     score = 0;
     time = 0;
@@ -644,6 +662,9 @@ function initGame() {
     ducking = false;
     flapsLeft = MAX_FLAPS;
     wingLift = 0;
+    flapT = 0;
+    flapActive = false;
+    wingPose = WING_FOLDED;
     runPhase = 0;
     deadTime = 0;
     gameOverAt = 0;
@@ -703,7 +724,7 @@ function initGame() {
       if (onGround) {
         vy = JUMP_V;
         onGround = false;
-        wingLift = Math.min(1, wingLift + 0.75);
+        startFlapCycle();
       }
       return;
     }
@@ -712,11 +733,11 @@ function initGame() {
     if (onGround) {
       vy = JUMP_V;
       onGround = false;
-      wingLift = Math.min(1, wingLift + 0.75);
+      startFlapCycle();
     } else if (flapsLeft > 0) {
       vy = Math.max(vy, 0) + FLAP_V;
       flapsLeft--;
-      wingLift = 1;
+      startFlapCycle();
     }
   }
 
@@ -815,6 +836,14 @@ function initGame() {
     wingLift = Math.max(0, wingLift - dt * 2.2);
     const airborne = running && !onGround;
 
+    if (airborne && flapActive) {
+      flapT += dt;
+      if (flapT >= FLAP_DURATION) flapActive = false;
+    } else if (!airborne) {
+      flapActive = false;
+      flapT = 0;
+    }
+
     rooster.root.position.set(PLAYER_X, GROUND_Y + playerY, 0);
 
     const idle = state === 'start';
@@ -858,11 +887,32 @@ function initGame() {
     rooster.legL.rotation.x = base.legLX + legSwing;
     rooster.legR.rotation.x = base.legRX - legSwing;
 
-    const wing = airborne || wingLift > 0
-      ? 0.18 + wingLift * 0.36
-      : (running ? 0.10 : 0.04);
-    rooster.wingL.rotation.z = base.wingLZ + wing;
-    rooster.wingR.rotation.z = base.wingRZ - wing;
+    let targetWingAngle;
+    if (airborne) {
+      if (flapActive) {
+        const p = Math.min(1, flapT / FLAP_DURATION);
+        const beat = 0.5 - 0.5 * Math.cos(p * Math.PI * 2 * FLAP_BEATS);
+        targetWingAngle = WING_DOWN + (WING_UP - WING_DOWN) * beat;
+      } else {
+        const glide = vy > 0 ? WING_GLIDE_UP : WING_GLIDE_DOWN;
+        targetWingAngle = glide + Math.sin(worldTime * 4.8) * 0.07;
+      }
+    } else if (ducking) {
+      targetWingAngle = WING_DUCK;
+    } else if (running) {
+      targetWingAngle = WING_FOLDED + Math.sin(runPhase * 2) * 0.05;
+    } else {
+      targetWingAngle = WING_FOLDED + Math.sin(worldTime * 2) * 0.035;
+    }
+
+    const wingFollow = flapActive ? 36 : 18;
+    wingPose += (targetWingAngle - wingPose) * Math.min(1, dt * wingFollow);
+    rooster.wingL.rotation.x = -wingPose;
+    rooster.wingR.rotation.x = wingPose;
+    rooster.wingL.rotation.y = 0;
+    rooster.wingR.rotation.y = 0;
+    rooster.wingL.rotation.z = 0;
+    rooster.wingR.rotation.z = 0;
 
     rooster.tailGroup.rotation.x = 0;
     rooster.tailGroup.rotation.z = base.tailZ + (airborne ? -0.08 : (running ? 0.05 : 0.02));
