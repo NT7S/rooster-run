@@ -883,9 +883,14 @@ function initGame() {
       rooster.legR.rotation.z = base.legRZ;
     }
 
-    const legSwing = (running && onGround && !ducking) ? Math.sin(runPhase) * 0.75 : 0;
-    rooster.legL.rotation.x = base.legLX + legSwing;
-    rooster.legR.rotation.x = base.legRX - legSwing;
+    rooster.legL.rotation.x = base.legLX;
+    rooster.legR.rotation.x = base.legRX;
+
+    if (running && onGround && !ducking) {
+      const legSwing = Math.sin(runPhase) * 0.75;
+      rooster.legL.rotation.z = base.legLZ + legSwing;
+      rooster.legR.rotation.z = base.legRZ - legSwing;
+    }
 
     let targetWingAngle;
     if (airborne) {
